@@ -1,112 +1,116 @@
-## Memory-Polynomial DPD Model
+# Digital Pre‑Distortion (DPD) Project
 
-This repository contains a Python implementation of a memory-polynomial Digital Predistortion (DPD) workflow for Power Amplifiers (PAs). The code covers:
+This repository contains two main phases of a Digital Pre‑Distortion system for RF Power Amplifiers:
 
-* **PA Simulation**: A memory-polynomial PA model (`pa_model`) capturing AM/AM and AM/PM distortion up to user-defined memory depth (M) and polynomial order (K).
-* **DPD Training**: Least-squares estimation to compute predistorter coefficients based on simulated PA output and known input signals.
-* **DPD Inference**: Application of the computed predistorter to new signals, followed by PA re-amplification, to evaluate distortion compensation.
-* **Performance Metrics & Visualization**: MSE evaluations (baseband, AM/AM, AM/PM) and binned median plots for AM/AM, AM/PM, and power-transfer characteristics.
+1. **High‑Level Modeling Phase (Python)**
+2. **RTL Implementation Phase (SystemVerilog)**
 
 ---
 
-### Features
+## 1. High‑Level Modeling Phase
 
-* **Configurable Parameters**: Easily adjust memory depth `M`, polynomial order `K`, and dataset sizes (`N_train`, `N_test`).
-* **Reproducible**: Fixed random seed ensures repeatable training/inference runs.
-* **Complex Coefficients**: Supports complex-valued PA coefficients for joint AM/AM and AM/PM behavior.
-* **JSON & NumPy Outputs**: Saves estimated DPD coefficients in both `.npy` and human-readable `.json` formats.
+### Overview
 
----
+The high‑level model characterizes amplifier non‑linearity using a memory‑polynomial (Volterra‑series) approach, solves for complex correction coefficients via least‑squares, and exports them for hardware realization.
 
-### Requirements
+### Directory Structure
 
-* Python 3.7+
-* NumPy
-* Matplotlib
-
-Install dependencies with:
-
-```bash
-pip install numpy matplotlib
+```
+/high_level/
+├── dpd_model.py         # Python script implementing PA model, regressor, LS solver
+├── dpd_coeffs.json      # Output JSON with computed coefficients
+├── dpd_real.txt         # (optional) golden real outputs for verification
+├── dpd_imag.txt         # (optional) golden imag outputs for verification
+└── requirements.txt     # Python dependencies (numpy, matplotlib)
 ```
 
----
+### Prerequisites
+
+* Python 3.8+
+* `numpy`
+* `matplotlib`
+* `json`
+
+Install dependencies:
+
+```bash
+pip install -r high_level/requirements.txt
+```
 
 ### Usage
 
-1. **Configuration**
-
-   * Open `dpd_workflow.py` (or your script file) and set:
-
-     ```python
-     M = 2        # Memory depth
-     K = 3        # Polynomial order
-     N_train = 5000
-     N_test  = 2000
-     ```
-   * Adjust PA coefficient dictionary `b` for your specific amplifier model.
-
-2. **Training Phase**
+1. **Generate coefficients**:
 
    ```bash
-   python dpd_workflow.py --mode train
+   python high_level/dpd_model.py
    ```
 
-   * Generates `x_train`, simulates `d_train = pa_model(x_train)`, builds predistorter basis, solves least-squares for `a_hat`, and saves:
+   * Solves for DPD coefficients and writes `dpd_coeffs.json`.
 
-     * `dpd_coeffs.npy`
-     * `dpd_coeffs.json`
+2. **Visualize constellations** (optional):
 
-3. **Inference Phase**
-
-   ```bash
-   python dpd_workflow.py --mode infer
-   ```
-
-   * Loads `dpd_coeffs.npy`, simulates a new `x_test`, compares PA output before/after DPD, computes MSE, and plots results.
+   * The script plots three scatter plots: PA output without DPD, with Python‑DPD, and (if available) RTL‑DPD.
 
 ---
 
-### Script Breakdown
+## 2. RTL Implementation Phase
 
-* **`pa_model(x)`**: Memory-polynomial PA simulator
-* **Training**:
+### Overview
 
-  * Generate random QAM-like waveform
-  * Simulate PA distortion
-  * Build basis `X_pred`
-  * Solve `X_pred @ a_hat ≈ x_train`
-  * Save DPD coefficients
-* **Inference**:
+The RTL design ingests IQ samples, buffers past taps, applies the trained coefficients via a MAC‑array, and streams out pre‑distorted samples. Includes a self‑checking testbench against the Python golden‑model.
 
-  * Reload `a_hat`
-  * Generate test waveform
-  * Evaluate PA output before (`y_no_dpd`) and after (`y_dpd`) DPD
-  * Compute MSE & AM/AM, AM/PM metrics
-  * Plot binned medians for visual analysis
+### Directory Structure
+
+```
+/rtl/
+├── sample_buffer.sv    # Circular buffer for M+1 taps
+├── dpd_mac_array.sv    # MAC array with CORDIC magnitude and polynomial terms
+├── coeff_rom.sv        # Dual‑port ROM loading coeffs from .mem files
+├── dpd_top.sv          # Top-level integration module
+├── dpd_top_tb.sv       # Self‑checking SystemVerilog testbench
+├── coeffs_real.mem     # Fixed‑point real coefficients (hex)
+├── coeffs_imag.mem     # Fixed‑point imag coefficients (hex)
+└── syn/                # Synthesis & constraint scripts
+    ├── dpd_top.sdc     # SDC constraints
+    ├── design_dc.tcl   # Synopsys Design Compiler script
+    └── libraries/      # Standard‑cell .db files
+```
+
+### Prerequisites
+
+* Synopsys Design Compiler
+* Standard‑cell libraries (TSMC 130 nm)
+* Vivado, QuestaSim or ModelSim for simulation
+
+### Simulation
+
+```bash
+# Compile RTL
+vlog rtl/*.sv
+# Run testbench
+vsim dpd_top_tb
+# Observe PASS messages and waveform
+```
+
+### Coefficient Conversion
+
+Convert JSON to `.mem` files (for coeff\_rom):
+
+```bash
+python scripts/json_to_mem.py high_level/dpd_coeffs.json rtl/coeffs_real.mem rtl/coeffs_imag.mem
+```
+
+### Synthesis & Timing
+
+```bash
+# Launch Design Compiler
+dc_shell -f syn/design_dc.tcl
+```
+
+* Top module: `dpd_top`
+* Clock period: 10 ns (100 MHz)
+* Reports: `area.rpt`, `power.rpt`, `setup.rpt`, `hold.rpt`, `constraints.rpt`
 
 ---
 
-### Visualization
 
-The final script produces a three-panel figure showing:
-
-1. **AM/AM**: Median output magnitude vs input power
-2. **AM/PM**: Median phase error vs input power
-3. **Power Transfer**: Output power (dB) vs input power (dB)
-
-These plots help assess predistortion performance across the input power range.
-
----
-
-### Extending & Customization
-
-* **Change PA Behavior**: Modify or replace `b` coefficients for different amplifier characteristics.
-* **Add Noise**: Insert noise into training or inference to simulate realistic channel conditions.
-* **Alternate Fitting**: Swap least-squares solver for regularized or weighted approaches.
-
----
-
-### License
-
-This project is provided under the MIT License. Feel free to use, modify, and distribute.
