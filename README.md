@@ -57,7 +57,7 @@ pip install -r high_level/requirements.txt
 
 ### Overview
 
-The RTL design ingests IQ samples, buffers past taps, applies the trained coefficients via a MAC‑array, and streams out pre‑distorted samples. Includes a self‑checking testbench against the Python golden‑model.
+TThe RTL design ingests IQ samples, buffers past taps, applies the trained coefficients via a MAC‑array, computes sample magnitudes using an FSM‑based sequential CORDIC algorithm (cordic_mag), and streams out pre‑distorted samples. Includes an RTL self‑checking testbench against the Python golden‑model.
 
 ### Directory Structure
 
@@ -65,6 +65,7 @@ The RTL design ingests IQ samples, buffers past taps, applies the trained coeffi
 /rtl/
 ├── sample_buffer.sv    # Circular buffer for M+1 taps
 ├── dpd_mac_array.sv    # MAC array with CORDIC magnitude and polynomial terms
+├── cordic_mag.sv       # FSM-based sequential CORDIC magnitude calculator
 ├── coeff_rom.sv        # Dual‑port ROM loading coeffs from .mem files
 ├── dpd_top.sv          # Top-level integration module
 ├── dpd_top_tb.sv       # Self‑checking SystemVerilog testbench
