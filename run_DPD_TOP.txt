@@ -1,0 +1,4 @@
+vlib work
+vlog  DPD_TOP.sv DPD_tb.sv 
+vsim -voptargs=+acc work.dpd_top_tb 
+add wave *
